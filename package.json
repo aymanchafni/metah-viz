@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "chart.js": "^4.4.4",
+    "chartjs-plugin-zoom": "^2.0.1",
     "eventsource": "^2.0.2",
     "next": "14.2.13",
     "react": "^18",
