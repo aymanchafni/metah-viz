@@ -22,7 +22,7 @@ const Home = () => {
          
    
              // We get the chart data
-             var initialData = {
+             const initialData = {
                 labels: Array(len1).fill(null),
                     datasets: [
                                {
