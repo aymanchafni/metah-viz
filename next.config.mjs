@@ -1,43 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-
-    typescript: {
-        // !! WARN !!
-        // Dangerously allow production builds to successfully complete even if
-        // your project has type errors.
-        // !! WARN !!
-        ignoreBuildErrors: true,
-    },
-    
-    
-    rewrites: async () => {
-        return [
-          {
-            source: "/api/:path*",
-            destination:
-              process.env.NODE_ENV === "development"
-                ? "http://127.0.0.1:8000/api/:path*"
-                : "/api/",
-          },
-          {
-            source: "/docs",
-            destination:
-              process.env.NODE_ENV === "development"
-                ? "http://127.0.0.1:8000/api/docs"
-                : "/api/docs",
-          },
-          {
-            source: "/openapi.json",
-            destination:
-              process.env.NODE_ENV === "development"
-                ? "http://127.0.0.1:8000/api/openapi.json"
-                : "/api/openapi.json",
-          },
-        ];
-      },
+  // The browser talks to the FastAPI backend directly (NEXT_PUBLIC_API_URL, CORS enabled):
+  // proxying Server-Sent Events through Next.js rewrites can buffer the stream.
+  output: "standalone",
 };
-
-
-
 
 export default nextConfig;
