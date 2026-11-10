@@ -3,11 +3,12 @@
 import { useState } from "react";
 
 import ConvergenceChart from "@/components/ConvergenceChart";
-import { ALGO_COLORS, type CompareResponse, fmt, getJSON, type Problem } from "@/lib/api";
+import { ALGO_COLORS, type CompareResponse, fmt, type Problem } from "@/lib/api";
+import type { Engine } from "@/lib/engine";
 
 /** Runs every algorithm on the selected problem several times and compares them fairly
  *  (same evaluation budget on the x-axis, statistics over seeds). */
-export default function ComparePanel({ problem }: { problem: Problem }) {
+export default function ComparePanel({ problem, engine }: { problem: Problem; engine: Engine }) {
   const [runs, setRuns] = useState(10);
   const [iterations, setIterations] = useState(100);
   const [data, setData] = useState<CompareResponse | null>(null);
@@ -18,7 +19,7 @@ export default function ComparePanel({ problem }: { problem: Problem }) {
     setLoading(true);
     setError(null);
     try {
-      setData(await getJSON<CompareResponse>("/api/compare", { problem: problem.name, runs, iterations }));
+      setData(await engine.compare(problem.name, iterations, runs));
     } catch (e) {
       setError(String(e));
     } finally {

@@ -1,4 +1,6 @@
-export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+// Set NEXT_PUBLIC_API_URL to use the FastAPI server; leave it empty to run the Python
+// engine in the browser (Pyodide). See src/lib/engine.ts.
+export const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 
 export type Problem = {
   name: string;

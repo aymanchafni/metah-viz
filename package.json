@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "copy-py": "node scripts/copy-py.mjs",
+    "predev": "npm run copy-py",
     "dev": "next dev",
+    "prebuild": "npm run copy-py",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",

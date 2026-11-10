@@ -3,9 +3,11 @@
 ![CI](https://github.com/aymanchafni/metah-viz/actions/workflows/ci.yml/badge.svg)
 
 An interactive lab for optimization algorithms. Pick a problem and an algorithm, tune its
-parameters, and watch it search the landscape in real time. A **Python (FastAPI +
-NumPy)** backend runs the algorithm and streams every iteration to a **Next.js /
-TypeScript** front end over **Server-Sent Events**.
+parameters, and watch it search the landscape in real time. The algorithms are written in
+**Python with NumPy**. They run **in your browser through Pyodide** (WebAssembly, in a Web
+Worker), so the site is fully static. The *same* Python package can also run behind a
+**FastAPI** server that streams iterations over **Server-Sent Events**. The front end is
+**Next.js / TypeScript**.
 
 ![Particle swarm converging on Rastrigin](docs/live.png)
 
@@ -36,40 +38,48 @@ feasible design (cost 6,474.9) from every seed tried.
 
 ```
 Next.js (React, TypeScript, Tailwind, Chart.js, <canvas>)
-   │  GET /api/problems, /api/algorithms, /api/problems/{name}/grid
-   │  GET /api/run?problem=&algorithm=&params=   ← text/event-stream, one event per iteration
-   │  GET /api/compare?problem=&runs=
-   ▼
-FastAPI ── metaheuristics/
-             ├── problems.py     vectorised objectives, bounds, constraints, grid slices
-             └── algorithms.py   optimizers as generators: steps() yields the state per iteration
+   │  src/lib/engine.ts — one interface, two interchangeable engines
+   ├──────────────────────────────┐
+   ▼ default                      ▼ when NEXT_PUBLIC_API_URL is set
+Web Worker + Pyodide            FastAPI (SSE stream, /api/compare, /api/problems/{name}/grid)
+   │  (Python 3.12 + NumPy        │
+   │   compiled to WebAssembly)   │
+   └──────────────┬───────────────┘
+                  ▼
+   metaheuristics/  (one Python package, shipped to the browser at build time)
+     ├── problems.py     vectorised objectives, bounds, constraints, grid slices
+     ├── algorithms.py   optimizers as generators: steps() yields the state per iteration
+     └── service.py      catalogue, validation, run/compare (transport-independent)
 ```
 
-Every optimizer is a Python generator, so the same code powers the live stream, the
-comparison endpoint and the tests. The stream stops when the browser disconnects.
+Every optimizer is a Python generator, so the same code powers the browser engine, the SSE
+stream, the comparison mode and the tests. Both engines give identical results for the same
+seed. The test suite also runs under Pyodide's Python 3.12 / NumPy 1.26 combination.
 
 ## Run it
 
 ```bash
-docker compose up --build        # → http://localhost:3000 (API on :8000, docs at /api/docs)
+npm install && npm run dev       # → http://localhost:3000, Python runs in the browser, no server needed
 ```
 
-Or in development:
+With the FastAPI server instead:
 
 ```bash
-pip install -r requirements-dev.txt
-uvicorn main:app --app-dir src/api --reload       # API on :8000
-npm install && npm run dev                        # UI on :3000
+docker compose up --build        # → http://localhost:3000 (API on :8000, docs at /api/docs)
+# or: pip install -r requirements-dev.txt && uvicorn main:app --app-dir src/api --reload
+#     NEXT_PUBLIC_API_URL=http://localhost:8000 npm run dev
 ```
 
-**Deploying:** the API is a plain Docker image (`api.Dockerfile`, e.g. on Render or Fly.io;
-set `CORS_ORIGINS` to the front-end URL). The front end deploys to Vercel with
-`NEXT_PUBLIC_API_URL` pointing at the API.
+**Deploying:** import the repo in Vercel with the default Next.js settings and no environment
+variables. The site is static and the algorithms run client-side. The first visit downloads
+Pyodide + NumPy from the jsDelivr CDN (~10 MB, cached afterwards). To use the server engine
+instead, deploy `api.Dockerfile` (set `CORS_ORIGINS` to the site URL) and set
+`NEXT_PUBLIC_API_URL` in Vercel.
 
 ## Tests
 
 ```bash
-pytest                              # 27 tests: bounds, monotone best-so-far, seeding, convergence,
-                                    # constraint feasibility, SSE stream, input validation
+pytest                              # 31 tests: bounds, monotone best-so-far, seeding, convergence,
+                                    # constraint feasibility, service layer, SSE stream, validation
 npm run typecheck && npm run lint
 ```
