@@ -5,16 +5,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ComparePanel from "@/components/ComparePanel";
 import ConvergenceChart from "@/components/ConvergenceChart";
 import Landscape from "@/components/Landscape";
-import {
-  ALGO_COLORS,
-  type Algorithm,
-  fmt,
-  getJSON,
-  type Grid,
-  type IterationState,
-  type Problem,
-  runUrl,
-} from "@/lib/api";
+import { ALGO_COLORS, type Algorithm, fmt, type Grid, type IterationState, type Problem } from "@/lib/api";
+import { type Engine, getEngine } from "@/lib/engine";
 
 type Status = "idle" | "running" | "done" | "error";
 
@@ -33,23 +25,29 @@ export default function Home() {
   const [history, setHistory] = useState<IterationState[]>([]);
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState<string | null>(null);
-  const source = useRef<EventSource | null>(null);
+  const [engine, setEngine] = useState<Engine | null>(null);
+  const [loading, setLoading] = useState(true);
+  const stopRun = useRef<(() => void) | null>(null);
 
   const problem = problems.find((p) => p.name === problemName);
   const algorithm = algorithms.find((a) => a.key === algoKey);
   const last = history.at(-1);
 
-  // Catalogue (problems + algorithms with their tunable parameters)
+  // Start the engine (Python in the browser by default) and load the catalogue
   useEffect(() => {
-    Promise.all([getJSON<Problem[]>("/api/problems"), getJSON<Algorithm[]>("/api/algorithms")])
+    const eng = getEngine();
+    setEngine(eng);
+    eng.ready
+      .then(() => Promise.all([eng.problems(), eng.algorithms()]))
       .then(([p, a]) => {
         setProblems(p);
         setAlgorithms(a);
       })
       .catch((e) => {
-        setError(`Cannot reach the API: ${e}`);
+        setError(eng.kind === "server" ? `Cannot reach the API: ${e}` : `Could not start the Python engine: ${e}`);
         setStatus("error");
-      });
+      })
+      .finally(() => setLoading(false));
   }, []);
 
   // Reset parameters to the algorithm's defaults when it changes
@@ -58,21 +56,20 @@ export default function Home() {
   }, [algorithm]);
 
   const stop = useCallback(() => {
-    source.current?.close();
-    source.current = null;
+    stopRun.current?.();
+    stopRun.current = null;
   }, []);
 
-  // Close the stream when the page unmounts (the old version leaked a connection per render)
+  // Stop any running search when the page unmounts
   useEffect(() => stop, [stop]);
 
   // Landscape: for >2-D problems, a 2-D slice through the best point found so far
   const sliceKey = problem && problem.dim > 2 && status !== "running" ? last?.best_x.join(",") : undefined;
   useEffect(() => {
-    if (!problem) return;
-    const query: Record<string, string | number> = { n: 90, dims: dims.join(",") };
-    if (sliceKey) query.fixed = sliceKey;
-    getJSON<Grid>(`/api/problems/${problem.name}/grid`, query).then(setGrid).catch(() => setGrid(null));
-  }, [problem, dims, sliceKey]);
+    if (!problem || !engine) return;
+    const fixed = sliceKey ? sliceKey.split(",").map(Number) : undefined;
+    engine.landscape(problem.name, 90, dims, fixed).then(setGrid).catch(() => setGrid(null));
+  }, [engine, problem, dims, sliceKey]);
 
   const selectProblem = (name: string) => {
     stop();
@@ -84,23 +81,22 @@ export default function Home() {
   };
 
   const start = () => {
-    if (!problem || !algorithm) return;
+    if (!problem || !algorithm || !engine) return;
     stop();
     setHistory([]);
     setError(null);
     setStatus("running");
-    const es = new EventSource(runUrl({ problem: problem.name, algorithm: algorithm.key, iterations, seed, delayMs, params }));
-    es.onmessage = (e) => setHistory((h) => [...h, JSON.parse(e.data) as IterationState]);
-    es.addEventListener("done", () => {
-      es.close();
-      setStatus("done");
-    });
-    es.onerror = () => {
-      es.close();
-      setStatus((s) => (s === "running" ? "error" : s));
-      setError((err) => err ?? "Stream interrupted (is the API running?)");
-    };
-    source.current = es;
+    stopRun.current = engine.run(
+      { problem: problem.name, algorithm: algorithm.key, iterations, seed, delayMs, params },
+      {
+        onState: (s) => setHistory((h) => [...h, s]),
+        onDone: () => setStatus("done"),
+        onError: (msg) => {
+          setStatus("error");
+          setError(msg);
+        },
+      },
+    );
   };
 
   const trail = useMemo(() => {
@@ -117,9 +113,16 @@ export default function Home() {
         <p className="font-mono text-xs uppercase tracking-widest text-sky-400">metaheuristics · live</p>
         <h1 className="mt-1 text-3xl font-bold sm:text-4xl">Metah-Viz</h1>
         <p className="mt-2 max-w-3xl text-slate-400">
-          Watch optimization algorithms search a landscape in real time. A Python (FastAPI + NumPy) backend runs the
-          algorithm and streams every iteration to the browser over Server-Sent Events.
+          Watch optimization algorithms search a landscape in real time. The algorithms are written in Python with
+          NumPy and run right here in your browser (Pyodide, in a Web Worker); the same code also runs behind a
+          FastAPI server that streams iterations over Server-Sent Events.
         </p>
+        {loading && (
+          <p className="mt-4 inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm text-slate-300">
+            <span className="h-3 w-3 animate-spin rounded-full border-2 border-sky-400 border-t-transparent" />
+            {engine?.kind === "server" ? "Connecting to the API…" : "Loading Python + NumPy in your browser (first visit ~10 MB)…"}
+          </p>
+        )}
       </header>
 
       <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
@@ -255,13 +258,14 @@ export default function Home() {
             </div>
           </div>
 
-          {problem && <ComparePanel problem={problem} />}
+          {problem && engine && <ComparePanel problem={problem} engine={engine} />}
         </section>
       </div>
 
       <footer className="mt-12 text-xs text-slate-500">
         Built by <a className="text-sky-400 hover:underline" href="https://aymanchafni.github.io">Ayman Chafni</a> ·{" "}
         <a className="text-sky-400 hover:underline" href="https://github.com/aymanchafni/metah-viz">source</a>
+        {engine && <> · engine: {engine.kind === "browser" ? "Python in your browser (Pyodide)" : "FastAPI server"}</>}
       </footer>
     </main>
   );

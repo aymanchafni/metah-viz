@@ -17,6 +17,17 @@ jobs:
       - run: ruff check .
       - run: pytest -v
 
+  pyodide-compat:
+    # The browser engine runs on Pyodide 0.26 (Python 3.12, NumPy 1.26): test that combination too.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install numpy==1.26.4 fastapi==0.115.6 httpx==0.28.1 pytest==8.3.4
+      - run: pytest -v
+
   web:
     runs-on: ubuntu-latest
     steps:
